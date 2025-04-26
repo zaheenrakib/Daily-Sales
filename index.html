@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🛍️ দৈনিক বিক্রয় হিসাব</title>
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: #ecf0f3;
+            margin: 0;
+            padding: 20px;
+        }
+        nav {
+            background: #27ae60;
+            padding: 10px 20px;
+            border-radius: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        nav button {
+            background: white;
+            color: #27ae60;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        nav button:hover {
+            background: #2ecc71;
+            color: white;
+        }
+        header {
+            background: #2ecc71;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            margin-top: 20px;
+            border-radius: 12px;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        }
+        input, button, select {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+        }
+        h2 {
+            margin-top: 0;
+            color: #34495e;
+        }
+        table {
+            width: 100%;
+            margin-top: 20px;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+        th {
+            background: #f1f2f6;
+        }
+        canvas {
+            margin-top: 20px;
+        }
+        #totalProfit {
+            font-size: 24px;
+            color: #27ae60;
+            margin-top: 20px;
+            text-align: center;
+        }
+        @media (max-width: 768px) {
+            nav {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<header>
+    <h1>🛍️ দৈনিক বিক্রয় হিসাব</h1>
+    <p>সারাদিনের লাভ সহজে হিসাব করুন</p>
+</header>
+
+<nav>
+    <button onclick="fetchSales()">📅 আজকের বিক্রয়</button>
+    <button onclick="fetchMonthlySales()">🗓️ মাসিক বিক্রয়</button>
+    <button onclick="downloadCSV()">⬇️ CSV ডাউনলোড</button>
+</nav>
+
+<div class="section">
+    <h2>➕ পণ্য বিক্রয় যুক্ত করুন</h2>
+    <form id="salesForm">
+        <input type="text" id="product" placeholder="পণ্যের নাম" required>
+        <input type="number" id="quantity" placeholder="পরিমাণ" required>
+        <input type="number" id="sellPrice" placeholder="বিক্রয় মূল্য (প্রতি ইউনিট)" required>
+        <input type="number" id="buyPrice" placeholder="ক্রয় মূল্য (প্রতি ইউনিট)" required>
+        <button type="submit">সেভ করুন ✅</button>
+    </form>
+</div>
+
+<div class="section">
+    <h2>📋 বিক্রয়ের তালিকা</h2>
+    <table id="salesTable">
+        <thead>
+            <tr>
+                <th>সময়</th>
+                <th>পণ্য</th>
+                <th>পরিমাণ</th>
+                <th>মোট বিক্রয়</th>
+                <th>মোট ক্রয়</th>
+                <th>লাভ</th>
+                <th>✏️</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <div id="totalProfit">মোট লাভ: ৳ 0</div>
+</div>
+
+<div class="section">
+    <h2>📈 লাভের গ্রাফ</h2>
+    <canvas id="profitChart"></canvas>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+    import { getFirestore, collection, addDoc, query, where, getDocs, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyAw-fkWSwQEp2HGDQsmpikTSpOATaW7gjI",
+        authDomain: "shad-bindhu.firebaseapp.com",
+        projectId: "shad-bindhu",
+        storageBucket: "shad-bindhu.appspot.com",
+        messagingSenderId: "406570765629",
+        appId: "1:406570765629:web:eb9712c774e10ef1dc0954"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const salesForm = document.getElementById("salesForm");
+    const salesTableBody = document.querySelector("#salesTable tbody");
+    const totalProfitEl = document.getElementById("totalProfit");
+
+    let profitChart;
+    let currentData = [];
+
+    salesForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const product = document.getElementById("product").value;
+        const quantity = parseFloat(document.getElementById("quantity").value);
+        const sellPrice = parseFloat(document.getElementById("sellPrice").value);
+        const buyPrice = parseFloat(document.getElementById("buyPrice").value);
+
+        const profit = (sellPrice - buyPrice) * quantity;
+        const totalSell = sellPrice * quantity;
+        const totalBuy = buyPrice * quantity;
+        const time = new Date().toLocaleTimeString("bn-BD");
+        const date = new Date().toLocaleDateString("bn-BD");
+
+        try {
+            await addDoc(collection(db, "sales"), {
+                date,
+                time,
+                product,
+                quantity,
+                sell: totalSell,
+                buy: totalBuy,
+                profit
+            });
+
+            salesForm.reset();
+            fetchSales();
+        } catch (error) {
+            console.error("Error adding sale:", error);
+        }
+    });
+
+    async function fetchSales() {
+        const today = new Date().toLocaleDateString("bn-BD");
+        const q = query(collection(db, "sales"), where("date", "==", today));
+        const querySnapshot = await getDocs(q);
+
+        showSales(querySnapshot);
+    }
+
+    async function fetchMonthlySales() {
+        const q = query(collection(db, "sales"));
+        const querySnapshot = await getDocs(q);
+
+        showSales(querySnapshot, true);
+    }
+
+    function showSales(querySnapshot, monthly = false) {
+        let totalProfit = 0;
+        let labels = [];
+        let profits = [];
+        currentData = [];
+
+        salesTableBody.innerHTML = "";
+        querySnapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            const saleDate = new Date(data.date);
+
+            const today = new Date();
+            if (!monthly || (saleDate.getMonth() === today.getMonth() && saleDate.getFullYear() === today.getFullYear())) {
+                totalProfit += data.profit;
+                labels.push(data.time);
+                profits.push(data.profit);
+                currentData.push({id: docSnap.id, ...data});
+
+                const row = `
+                    <tr>
+                        <td>${data.time}</td>
+                        <td>${data.product}</td>
+                        <td>${data.quantity}</td>
+                        <td>৳${data.sell}</td>
+                        <td>৳${data.buy}</td>
+                        <td>৳${data.profit}</td>
+                        <td><button onclick="deleteSale('${docSnap.id}')">🗑️</button></td>
+                    </tr>
+                `;
+                salesTableBody.innerHTML += row;
+            }
+        });
+
+        totalProfitEl.innerText = `মোট লাভ: ৳ ${totalProfit}`;
+
+        updateChart(labels, profits);
+    }
+
+    function updateChart(labels, profits) {
+        const ctx = document.getElementById("profitChart").getContext("2d");
+
+        if (profitChart) {
+            profitChart.destroy();
+        }
+
+        profitChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'প্রতি বিক্রয়ের লাভ',
+                    data: profits,
+                    backgroundColor: '#2ecc71',
+                    borderColor: '#27ae60',
+                    fill: true
+                }]
+            }
+        });
+    }
+
+    window.deleteSale = async function(id) {
+        if (confirm("আপনি কি নিশ্চিত ডিলিট করতে চান?")) {
+            await deleteDoc(doc(db, "sales", id));
+            fetchSales();
+        }
+    }
+
+    window.downloadCSV = function() {
+        let csv = "সময়,পণ্য,পরিমাণ,মোট বিক্রয়,মোট ক্রয়,লাভ\n";
+        currentData.forEach(row => {
+            csv += `${row.time},${row.product},${row.quantity},${row.sell},${row.buy},${row.profit}\n`;
+        });
+
+        const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "sales_report.csv";
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    fetchSales();
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+</body>
+</html>
